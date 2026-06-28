@@ -217,15 +217,28 @@ function App() {
 
                 {jobStatus === 'completed' && jobResult && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 text-green-400 font-bold justify-center">
+                    <div className="flex items-center gap-2 text-green-400 font-bold justify-center text-lg">
                       <CheckCircle2 size={24} /> Download Ready!
                     </div>
+                    
+                    {/* Download Complete Ad Placeholder */}
+                    <div className="bg-slate-900/80 border border-slate-700 rounded-xl p-4 flex flex-col gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 bg-purple-600/20 rounded flex items-center justify-center text-purple-500 font-bold">AD</div>
+                        <div className="flex-1">
+                          <div className="text-sm font-bold text-slate-200">Recommended for you</div>
+                          <div className="text-xs text-slate-500">Premium quality and faster speeds.</div>
+                        </div>
+                        <button className="text-[10px] uppercase font-bold tracking-wider px-2 py-1 border border-slate-600 text-slate-500 rounded hover:bg-slate-800 transition-colors">Sponsored</button>
+                      </div>
+                    </div>
+
                     <a 
                       href={jobResult.downloadUrl} 
                       download
-                      className="w-full bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all"
+                      className="w-full bg-green-600 hover:bg-green-500 text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-green-900/20"
                     >
-                      <Download size={20} /> SAVE FILE
+                      <Download size={20} /> SAVE FILE NOW
                     </a>
                     <button 
                       onClick={() => { setInfo(null); setUrl(''); setJobStatus(null); setJobResult(null); }}
