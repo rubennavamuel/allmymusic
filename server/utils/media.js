@@ -132,6 +132,7 @@ function downloadYtdlp(url, options, onProgress) {
     args.push(url);
 
     const child = spawn('yt-dlp', args);
+    let stderr = '';
 
     child.stdout.on('data', (data) => {
       const line = data.toString();
@@ -142,10 +143,15 @@ function downloadYtdlp(url, options, onProgress) {
       }
     });
 
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
     child.on('close', (code) => {
       if (code === 0) {
         resolve({ filename, outputPath });
       } else {
+        console.error('yt-dlp error output:', stderr);
         reject(new Error(`yt-dlp download failed with code ${code}`));
       }
     });
@@ -166,6 +172,7 @@ function downloadSpotify(url, options, onProgress) {
     ];
 
     const child = spawn('spotdl', args);
+    let stderr = '';
 
     child.stdout.on('data', (data) => {
       const line = data.toString();
@@ -174,6 +181,10 @@ function downloadSpotify(url, options, onProgress) {
       if (match && onProgress) {
         onProgress(parseInt(match[1]));
       }
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
     });
 
     child.on('close', (code) => {
@@ -191,6 +202,7 @@ function downloadSpotify(url, options, onProgress) {
           resolve({ message: 'Download complete', directory: DOWNLOAD_DIR });
         }
       } else {
+        console.error('spotdl error output:', stderr);
         reject(new Error(`spotdl download failed with code ${code}`));
       }
     });
