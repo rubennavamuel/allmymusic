@@ -1,3 +1,4 @@
+console.log("ALLMYMUSIC_SERVER_START_V1");
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -10,9 +11,13 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
 
-// Job store
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.path}`);
+  next();
+});
+
+// API routes
 const jobs = {};
 
 app.get('/api/health', (req, res) => {
@@ -35,11 +40,12 @@ app.post('/api/info', async (req, res) => {
 });
 
 app.post('/api/download', async (req, res) => {
-  const { url, options } = req.body;
+  const { url, format, quality } = req.body;
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
   }
 
+  const options = { format, quality };
   const jobId = Date.now().toString();
   jobs[jobId] = { status: 'starting', progress: 0, createdAt: Date.now() };
 
@@ -76,19 +82,39 @@ app.get('/api/job/:id', (req, res) => {
   res.json(job);
 });
 
-// Cleanup old jobs and files (simple version)
+// Static files (downloads)
+app.use('/downloads', express.static(DOWNLOAD_DIR));
+
+// Frontend static files (built assets)
+const distPath = path.join(__dirname, '../client/dist');
+console.log(`Static dist path: ${distPath}`);
+if (fs.existsSync(distPath)) {
+  console.log("Dist path exists");
+  console.log("Contents:", fs.readdirSync(distPath));
+} else {
+  console.log("Dist path DOES NOT exist");
+}
+app.use(express.static(distPath));
+
+// Fallback to index.html for SPA routing
+app.use((req, res) => {
+  if (req.path.startsWith('/api') || req.path.startsWith('/downloads')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  res.sendFile(path.join(__dirname, '../client/dist/index.html'));
+});
+
+// Cleanup old jobs and files
 setInterval(() => {
   const now = Date.now();
   const MAX_AGE = 1000 * 60 * 60; // 1 hour
   
-  // Cleanup jobs
   Object.keys(jobs).forEach(jobId => {
     if (now - jobs[jobId].createdAt > MAX_AGE) {
       delete jobs[jobId];
     }
   });
 
-  // Cleanup files
   if (fs.existsSync(DOWNLOAD_DIR)) {
     fs.readdirSync(DOWNLOAD_DIR).forEach(file => {
       if (file === '.gitkeep' || file.startsWith('.')) return;
@@ -100,7 +126,7 @@ setInterval(() => {
       }
     });
   }
-}, 1000 * 60 * 10); // Every 10 mins
+}, 1000 * 60 * 10);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server is listening on http://0.0.0.0:${PORT}`);

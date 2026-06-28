@@ -110,16 +110,26 @@ async function download(url, options = {}, onProgress) {
 
 function downloadYtdlp(url, options, onProgress) {
   return new Promise((resolve, reject) => {
-    const { formatId = 'best', ext = 'mp4' } = options;
-    const filename = `dl_${Date.now()}.${ext}`;
+    const { format = 'mp4', quality = 'best' } = options;
+    const isAudio = format === 'mp3';
+    const ext = isAudio ? 'mp3' : 'mp4';
+    const jobId = Date.now();
+    const filename = `dl_${jobId}.${ext}`;
     const outputPath = path.join(DOWNLOAD_DIR, filename);
 
-    // Use -o to specify output path
     const args = [
-      '-f', formatId,
       '-o', outputPath,
-      url
     ];
+
+    if (isAudio) {
+      args.push('--extract-audio', '--audio-format', 'mp3');
+      args.push('-f', 'bestaudio/best');
+    } else {
+      args.push('-f', quality === 'best' ? 'bestvideo+bestaudio/best' : 'best');
+      args.push('--merge-output-format', 'mp4');
+    }
+
+    args.push(url);
 
     const child = spawn('yt-dlp', args);
 
