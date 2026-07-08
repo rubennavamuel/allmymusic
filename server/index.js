@@ -26,26 +26,34 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/info', async (req, res) => {
   const { url } = req.body;
+  console.log(`[${new Date().toISOString()}] Received /api/info request for: ${url}`);
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
   }
 
   try {
-    const info = await getInfo(url);
+    // Add a 60-second timeout to the info fetch
+    const infoPromise = getInfo(url);
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('Request timed out fetching media info')), 60000)
+    );
+
+    const info = await Promise.race([infoPromise, timeoutPromise]);
+    console.log(`[${new Date().toISOString()}] Successfully fetched info for: ${url}`);
     res.json(info);
   } catch (err) {
-    console.error('Error getting info:', err);
+    console.error(`[${new Date().toISOString()}] Error getting info for ${url}:`, err);
     res.status(500).json({ error: err.message });
   }
 });
 
 app.post('/api/download', async (req, res) => {
-  const { url, format, quality } = req.body;
+  const { url, format, quality, title } = req.body;
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
   }
 
-  const options = { format, quality };
+  const options = { format, quality, title };
   const jobId = Date.now().toString();
   jobs[jobId] = { status: 'starting', progress: 0, createdAt: Date.now() };
 
