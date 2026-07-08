@@ -28,6 +28,7 @@ function getYtdlpInfo(url) {
     const child = spawn('yt-dlp', [
       '-j', 
       '--simulate', 
+      '--js-runtime', 'node',
       '--user-agent', USER_AGENT,
       '--no-check-certificate',
       url
@@ -164,6 +165,7 @@ function downloadYtdlp(url, options, onProgress) {
     const args = [
       '-o', outputTemplate,
       '--print', 'after_move:filepath',
+      '--js-runtime', 'node',
       '--user-agent', USER_AGENT,
       '--no-check-certificate',
     ];
