@@ -20,11 +20,27 @@ async function getInfo(url) {
   }
 }
 
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
+
 function getYtdlpInfo(url) {
   return new Promise((resolve, reject) => {
-    const child = spawn('yt-dlp', ['-j', '--simulate', url]);
+    console.log(`[${new Date().toISOString()}] Running yt-dlp info for ${url}`);
+    const child = spawn('yt-dlp', [
+      '-j', 
+      '--simulate', 
+      '--js-runtime', 'node',
+      '--user-agent', USER_AGENT,
+      '--no-check-certificate',
+      url
+    ]);
     let stdout = '';
     let stderr = '';
+
+    // Add a 60-second timeout inside the promise
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error('yt-dlp info fetch timed out after 60s'));
+    }, 60000);
 
     child.stdout.on('data', (data) => {
       stdout += data;
@@ -35,7 +51,9 @@ function getYtdlpInfo(url) {
     });
 
     child.on('close', (code) => {
+      clearTimeout(timeout);
       if (code !== 0) {
+        console.error(`[${new Date().toISOString()}] yt-dlp failed for ${url}. Stderr: ${stderr}`);
         return reject(new Error(`yt-dlp failed with code ${code}: ${stderr}`));
       }
       try {
@@ -44,19 +62,20 @@ function getYtdlpInfo(url) {
           title: info.title,
           thumbnail: info.thumbnail,
           duration: info.duration,
-          formats: info.formats.map(f => ({
+          formats: info.formats ? info.formats.map(f => ({
             formatId: f.format_id,
             ext: f.ext,
             resolution: f.resolution,
             filesize: f.filesize,
             vcodec: f.vcodec,
             acodec: f.acodec
-          })),
+          })) : [],
           uploader: info.uploader,
           url: info.webpage_url,
           source: 'yt-dlp'
         });
       } catch (err) {
+        console.error(`[${new Date().toISOString()}] Failed to parse yt-dlp output for ${url}:`, err);
         reject(err);
       }
     });
@@ -66,16 +85,35 @@ function getYtdlpInfo(url) {
 function getSpotifyInfo(url) {
   return new Promise((resolve, reject) => {
     const tempFile = path.join(DOWNLOAD_DIR, `meta_${Date.now()}.spotdl`);
+    console.log(`[${new Date().toISOString()}] Running spotdl save for ${url} into ${tempFile}`);
     const child = spawn('spotdl', ['save', url, '--save-file', tempFile]);
+    let stderr = '';
+
+    // Add a 60-second timeout inside the promise
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error('spotdl info fetch timed out after 60s'));
+    }, 60000);
+
+    child.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
     
     child.on('close', (code) => {
+      clearTimeout(timeout);
       if (code !== 0) {
-        return reject(new Error(`spotdl failed with code ${code}`));
+        console.error(`[${new Date().toISOString()}] spotdl save failed for ${url}. Code: ${code}. Stderr: ${stderr}`);
+        return reject(new Error(`spotdl failed with code ${code}: ${stderr}`));
       }
       try {
+        if (!fs.existsSync(tempFile)) {
+          throw new Error('spotdl metadata file was not created');
+        }
         const data = fs.readFileSync(tempFile, 'utf8');
         const info = JSON.parse(data);
         fs.unlinkSync(tempFile); // Clean up
+        
+        console.log(`[${new Date().toISOString()}] Successfully parsed spotdl metadata for ${url}`);
         
         // Spotdl returns an array of tracks
         const tracks = info.map(t => ({
@@ -91,9 +129,11 @@ function getSpotifyInfo(url) {
         resolve({
           title: tracks.length === 1 ? tracks[0].title : 'Spotify Playlist/Album',
           tracks: tracks,
+          thumbnail: tracks.length > 0 ? tracks[0].thumbnail : null,
           source: 'spotdl'
         });
       } catch (err) {
+        console.error(`[${new Date().toISOString()}] Failed to process spotdl output for ${url}:`, err);
         reject(err);
       }
     });
@@ -108,17 +148,26 @@ async function download(url, options = {}, onProgress) {
   }
 }
 
+function sanitizeFilename(filename) {
+  return filename.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+}
+
 function downloadYtdlp(url, options, onProgress) {
   return new Promise((resolve, reject) => {
-    const { format = 'mp4', quality = 'best' } = options;
+    const { format = 'mp4', quality = 'best', title } = options;
     const isAudio = format === 'mp3';
     const ext = isAudio ? 'mp3' : 'mp4';
-    const jobId = Date.now();
-    const filename = `dl_${jobId}.${ext}`;
-    const outputPath = path.join(DOWNLOAD_DIR, filename);
+    
+    // Use yt-dlp's built-in %(title)s template so the actual video title is used
+    // --print after_move:filepath prints the final file path so we know what was created
+    const outputTemplate = path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s');
 
     const args = [
-      '-o', outputPath,
+      '-o', outputTemplate,
+      '--print', 'after_move:filepath',
+      '--js-runtime', 'node',
+      '--user-agent', USER_AGENT,
+      '--no-check-certificate',
     ];
 
     if (isAudio) {
@@ -132,11 +181,13 @@ function downloadYtdlp(url, options, onProgress) {
     args.push(url);
 
     const child = spawn('yt-dlp', args);
+    let stdout = '';
     let stderr = '';
 
     child.stdout.on('data', (data) => {
+      stdout += data.toString();
+      // Extract progress from stdout (yt-dlp outputs progress here when --print is used)
       const line = data.toString();
-      // Simple regex to extract progress
       const match = line.match(/(\d+\.?\d*)%/);
       if (match && onProgress) {
         onProgress(parseFloat(match[1]));
@@ -145,11 +196,35 @@ function downloadYtdlp(url, options, onProgress) {
 
     child.stderr.on('data', (data) => {
       stderr += data.toString();
+      // Also try to extract progress from stderr
+      const line = data.toString();
+      const match = line.match(/(\d+\.?\d*)%/);
+      if (match && onProgress) {
+        onProgress(parseFloat(match[1]));
+      }
     });
 
     child.on('close', (code) => {
       if (code === 0) {
-        resolve({ filename, outputPath });
+        // The last line of stdout should contain the actual file path from --print after_move:filepath
+        const lines = stdout.trim().split('\n').filter(l => l.trim());
+        const actualPath = lines[lines.length - 1] || '';
+        if (actualPath && fs.existsSync(actualPath)) {
+          const filename = path.basename(actualPath);
+          resolve({ filename, outputPath: actualPath });
+        } else {
+          // Fallback: find the newest file in the download directory
+          const files = fs.readdirSync(DOWNLOAD_DIR)
+            .filter(f => !f.startsWith('.') && f !== '.gitkeep')
+            .map(f => ({ name: f, time: fs.statSync(path.join(DOWNLOAD_DIR, f)).mtime.getTime() }))
+            .sort((a, b) => b.time - a.time);
+          if (files.length > 0) {
+            const filename = files[0].name;
+            resolve({ filename, outputPath: path.join(DOWNLOAD_DIR, filename) });
+          } else {
+            reject(new Error('Download completed but could not find the output file'));
+          }
+        }
       } else {
         console.error('yt-dlp error output:', stderr);
         reject(new Error(`yt-dlp download failed with code ${code}`));

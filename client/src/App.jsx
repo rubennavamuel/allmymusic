@@ -60,10 +60,15 @@ function App() {
       if (res.ok) {
         setInfo(data);
       } else {
-        setError(data.error || 'Failed to fetch media info');
+        // Provide more specific error feedback
+        let msg = data.error || 'Failed to fetch media info';
+        if (msg.includes('403')) msg = 'Access Forbidden (403). Try another link.';
+        if (msg.includes('NotFound')) msg = 'Media not found on Spotify. It might be restricted or invalid.';
+        if (msg.includes('timeout')) msg = 'Request timed out. The server is busy, please try again.';
+        setError(msg);
       }
     } catch (err) {
-      setError('Connection error. Is the server running?');
+      setError('Connection error: Could not reach the download server.');
     } finally {
       setLoading(false);
     }
@@ -72,11 +77,21 @@ function App() {
   const startDownload = async () => {
     setError(null);
     setJobStatus('starting');
+    
+    // PopAds — pop-under al hacer clic en Download
+    try {
+      if (window.popads && typeof window.popads.openPopunder === 'function') {
+        window.popads.openPopunder();
+      }
+    } catch (e) {
+      console.log('PopAds not ready yet');
+    }
+    
     try {
       const res = await fetch('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, format, quality })
+        body: JSON.stringify({ url, format, quality, title: info?.title })
       });
       const data = await res.json();
       if (res.ok) {
