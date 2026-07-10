@@ -1,22 +1,37 @@
 const { spawn, exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const archiver = require('archiver');
 
 const DOWNLOAD_DIR = path.join(__dirname, '..', 'public', 'downloads');
+const ZIP_DIR = path.join(__dirname, '..', 'public', 'zips');
 
 if (!fs.existsSync(DOWNLOAD_DIR)) {
   fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+}
+if (!fs.existsSync(ZIP_DIR)) {
+  fs.mkdirSync(ZIP_DIR, { recursive: true });
 }
 
 function isSpotifyUrl(url) {
   return /open\.spotify\.com\/(track|album|playlist)/.test(url);
 }
 
+function isYoutubePlaylist(url) {
+  return /youtube\.com\/.*\b(list=|playlist\b)|youtu\.be\/.*\b(list=|playlist\b)/i.test(url) || /\/playlist\b/.test(url);
+}
+
 async function getInfo(url) {
   if (isSpotifyUrl(url)) {
-    return getSpotifyInfo(url);
+    const info = await getSpotifyInfo(url);
+    info.isPlaylist = info.tracks && info.tracks.length > 1;
+    return info;
+  } else if (isYoutubePlaylist(url)) {
+    return getYtdlpPlaylistInfo(url);
   } else {
-    return getYtdlpInfo(url);
+    const info = await getYtdlpInfo(url);
+    info.isPlaylist = false;
+    return info;
   }
 }
 
@@ -72,10 +87,74 @@ function getYtdlpInfo(url) {
           })) : [],
           uploader: info.uploader,
           url: info.webpage_url,
-          source: 'yt-dlp'
+          source: 'yt-dlp',
+          tracks: [],
+          isPlaylist: false
         });
       } catch (err) {
         console.error(`[${new Date().toISOString()}] Failed to parse yt-dlp output for ${url}:`, err);
+        reject(err);
+      }
+    });
+  });
+}
+
+function getYtdlpPlaylistInfo(url) {
+  return new Promise((resolve, reject) => {
+    console.log(`[${new Date().toISOString()}] Running yt-dlp playlist info for ${url}`);
+    // Use --flat-playlist to get list of videos without downloading details
+    const child = spawn('yt-dlp', [
+      '-J', 
+      '--flat-playlist',
+      '--js-runtime', 'node',
+      '--user-agent', USER_AGENT,
+      '--no-check-certificate',
+      url
+    ]);
+    let stdout = '';
+    let stderr = '';
+
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error('yt-dlp playlist info fetch timed out after 60s'));
+    }, 60000);
+
+    child.stdout.on('data', (data) => {
+      stdout += data;
+    });
+
+    child.stderr.on('data', (data) => {
+      stderr += data;
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        console.error(`[${new Date().toISOString()}] yt-dlp playlist failed for ${url}. Stderr: ${stderr}`);
+        return reject(new Error(`yt-dlp playlist failed with code ${code}: ${stderr}`));
+      }
+      try {
+        const info = JSON.parse(stdout);
+        const entries = info.entries || [];
+        const tracks = entries.map(entry => ({
+          title: entry.title || 'Unknown',
+          url: entry.url || entry.webpage_url || '',
+          duration: entry.duration || 0,
+          thumbnail: entry.thumbnail || info.thumbnail || '',
+          source: 'yt-dlp'
+        }));
+        
+        resolve({
+          title: info.title || 'YouTube Playlist',
+          thumbnail: info.thumbnail || (tracks.length > 0 ? tracks[0].thumbnail : ''),
+          uploader: info.uploader || '',
+          url: info.webpage_url || url,
+          source: 'yt-dlp',
+          tracks: tracks,
+          isPlaylist: true
+        });
+      } catch (err) {
+        console.error(`[${new Date().toISOString()}] Failed to parse yt-dlp playlist output for ${url}:`, err);
         reject(err);
       }
     });
@@ -284,9 +363,66 @@ function downloadSpotify(url, options, onProgress) {
   });
 }
 
+async function downloadBatch(urls, options = {}, onProgress) {
+  const results = [];
+  const total = urls.length;
+  
+  for (let i = 0; i < total; i++) {
+    const url = urls[i];
+    console.log(`[${new Date().toISOString()}] Batch download ${i + 1}/${total}: ${url}`);
+    
+    try {
+      const result = await download(url, options, (progress) => {
+        if (onProgress) {
+          // Overall progress: (i/total) + (progress/100 * 1/total)
+          const overall = ((i / total) + (progress / 100 * (1 / total))) * 100;
+          onProgress(Math.round(overall), i + 1, total);
+        }
+      });
+      results.push(result);
+    } catch (err) {
+      console.error(`[${new Date().toISOString()}] Batch download failed for ${url}:`, err);
+      results.push({ error: err.message, url });
+    }
+  }
+  
+  return results;
+}
+
+function createZipFromFiles(files, zipName) {
+  return new Promise((resolve, reject) => {
+    const zipPath = path.join(ZIP_DIR, zipName);
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver('zip', { zlib: { level: 5 } });
+
+    output.on('close', () => {
+      console.log(`[${new Date().toISOString()}] ZIP created: ${zipPath} (${archive.pointer()} bytes)`);
+      resolve({ zipPath, zipName, size: archive.pointer() });
+    });
+
+    archive.on('error', (err) => {
+      reject(err);
+    });
+
+    archive.pipe(output);
+
+    files.forEach(file => {
+      if (file.outputPath && fs.existsSync(file.outputPath)) {
+        archive.file(file.outputPath, { name: file.filename || path.basename(file.outputPath) });
+      }
+    });
+
+    archive.finalize();
+  });
+}
+
 module.exports = {
   getInfo,
   isSpotifyUrl,
+  isYoutubePlaylist,
   download,
-  DOWNLOAD_DIR
+  downloadBatch,
+  createZipFromFiles,
+  DOWNLOAD_DIR,
+  ZIP_DIR
 };
