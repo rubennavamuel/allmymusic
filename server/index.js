@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const { getInfo, download, DOWNLOAD_DIR } = require('./utils/media');
+const { getInfo, download, downloadBatch, createZipFromFiles, DOWNLOAD_DIR, ZIP_DIR } = require('./utils/media');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -90,8 +90,78 @@ app.get('/api/job/:id', (req, res) => {
   res.json(job);
 });
 
+// Batch download endpoint — accepts array of URLs, returns a zip
+app.post('/api/download-batch', async (req, res) => {
+  const { urls, format, quality } = req.body;
+  if (!urls || !Array.isArray(urls) || urls.length === 0) {
+    return res.status(400).json({ error: 'URLs array is required' });
+  }
+
+  const options = { format, quality };
+  const jobId = Date.now().toString();
+  const batchSize = urls.length;
+  jobs[jobId] = { status: 'starting', progress: 0, currentItem: 0, totalItems: batchSize, createdAt: Date.now() };
+
+  // Start the batch download asynchronously
+  downloadBatch(urls, options, (progress, current, total) => {
+    if (jobs[jobId]) {
+      jobs[jobId].progress = progress;
+      jobs[jobId].currentItem = current;
+      jobs[jobId].totalItems = total;
+      jobs[jobId].status = 'downloading';
+    }
+  }).then(async (results) => {
+    const successfulFiles = results.filter(r => r.filename);
+    if (successfulFiles.length === 0) {
+      if (jobs[jobId]) {
+        jobs[jobId].status = 'failed';
+        jobs[jobId].error = 'All downloads failed';
+      }
+      return;
+    }
+
+    // Create ZIP from successful downloads
+    try {
+      const zipName = `batch_${jobId}.zip`;
+      const zipResult = await createZipFromFiles(successfulFiles, zipName);
+      
+      if (jobs[jobId]) {
+        jobs[jobId].status = 'completed';
+        jobs[jobId].result = {
+          zipName: zipResult.zipName,
+          zipSize: zipResult.size,
+          downloadUrl: `/zips/${zipResult.zipName}`,
+          totalFiles: batchSize,
+          successfulFiles: successfulFiles.length,
+          failedFiles: results.filter(r => r.error).length,
+          files: results.map(r => ({
+            filename: r.filename || null,
+            error: r.error || null
+          }))
+        };
+        jobs[jobId].completedAt = Date.now();
+      }
+    } catch (err) {
+      console.error(`ZIP creation failed for job ${jobId}:`, err);
+      if (jobs[jobId]) {
+        jobs[jobId].status = 'failed';
+        jobs[jobId].error = 'ZIP creation failed: ' + err.message;
+      }
+    }
+  }).catch((err) => {
+    console.error(`Batch download failed for job ${jobId}:`, err);
+    if (jobs[jobId]) {
+      jobs[jobId].status = 'failed';
+      jobs[jobId].error = err.message;
+    }
+  });
+
+  res.json({ jobId });
+});
+
 // Static files (downloads)
 app.use('/downloads', express.static(DOWNLOAD_DIR));
+app.use('/zips', express.static(ZIP_DIR));
 
 // Frontend static files (built assets)
 const distPath = path.join(__dirname, '../client/dist');
