@@ -168,11 +168,11 @@ function getSpotifyInfo(url) {
     const child = spawn('spotdl', ['save', url, '--save-file', tempFile]);
     let stderr = '';
 
-    // Add a 60-second timeout inside the promise
+    // Add a 120-second timeout for Spotify (albums/playlists can take longer)
     const timeout = setTimeout(() => {
       child.kill();
-      reject(new Error('spotdl info fetch timed out after 60s'));
-    }, 60000);
+      reject(new Error('spotdl info fetch timed out after 120s'));
+    }, 120000);
 
     child.stderr.on('data', (data) => {
       stderr += data.toString();
@@ -370,6 +370,12 @@ async function downloadBatch(urls, options = {}, onProgress) {
   for (let i = 0; i < total; i++) {
     const url = urls[i];
     console.log(`[${new Date().toISOString()}] Batch download ${i + 1}/${total}: ${url}`);
+    
+    // Immediately emit progress so the job status moves from "starting" to "downloading"
+    if (onProgress) {
+      const overall = (i / total) * 100;
+      onProgress(Math.round(overall), i + 1, total);
+    }
     
     try {
       const result = await download(url, options, (progress) => {
