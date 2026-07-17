@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Search, Download, Music, Video, Loader2, CheckCircle2, AlertCircle, ListMusic, CheckSquare, Square } from 'lucide-react'
+import { Search, Download, Music, Video, Loader2, CheckCircle2, AlertCircle, ListMusic, CheckSquare, Square, Clock } from 'lucide-react'
 import { clsx } from 'clsx'
 
 function App() {
@@ -207,6 +207,22 @@ function App() {
           </button>
         </form>
 
+        {/* Loading indicator during fetch */}
+        {loading && (
+          <div className="mt-6 space-y-4 animate-in fade-in duration-300">
+            <div className="flex items-center gap-3 text-slate-300">
+              <Loader2 className="animate-spin text-purple-400" size={20} />
+              <span className="text-sm font-medium">Fetching media info...</span>
+            </div>
+            <div className="w-full bg-slate-900 rounded-full h-2 border border-slate-700 overflow-hidden">
+              <div className="bg-gradient-to-r from-purple-500 to-pink-500 h-full rounded-full animate-pulse"
+                style={{ width: '60%' }}
+              ></div>
+            </div>
+            <p className="text-xs text-slate-500">This may take up to 60 seconds for large playlists or albums.</p>
+          </div>
+        )}
+
         {error && (
           <div className="mt-4 p-4 bg-red-900/30 border border-red-800 text-red-200 rounded-xl flex items-center gap-3">
             <AlertCircle size={20} />
@@ -282,15 +298,24 @@ function App() {
                   <div className="space-y-3">
                     <div className="flex justify-between text-sm font-medium">
                       <span className="flex items-center gap-2">
-                        <Loader2 className="animate-spin text-purple-500" size={16} />
-                        {jobStatus === 'starting' ? 'Preparing...' : 'Downloading...'}
+                        {jobStatus === 'starting' ? (
+                          <Clock className="text-purple-400 animate-pulse" size={16} />
+                        ) : (
+                          <Loader2 className="animate-spin text-purple-500" size={16} />
+                        )}
+                        {jobStatus === 'starting' ? 'Starting download... please wait' : 'Downloading...'}
                       </span>
-                      <span>{progress}%</span>
+                      <span>{jobStatus === 'starting' ? '--' : `${batchProgress.current}/${batchProgress.total}`}</span>
                     </div>
                     <div className="w-full bg-slate-900 rounded-full h-3 border border-slate-700 overflow-hidden">
                       <div 
-                        className="bg-purple-500 h-full transition-all duration-300"
-                        style={{ width: `${progress}%` }}
+                        className={clsx(
+                          "h-full transition-all duration-500",
+                          jobStatus === 'starting' 
+                            ? "bg-gradient-to-r from-purple-500 to-pink-500 animate-pulse" 
+                            : "bg-purple-500"
+                        )}
+                        style={{ width: jobStatus === 'starting' ? '30%' : `${progress}%` }}
                       ></div>
                     </div>
                   </div>
@@ -456,15 +481,24 @@ function App() {
                 <div className="space-y-3">
                   <div className="flex justify-between text-sm font-medium">
                     <span className="flex items-center gap-2">
-                      <Loader2 className="animate-spin text-purple-500" size={16} />
-                      {jobStatus === 'starting' ? 'Preparing...' : `Downloading ${batchProgress.current}/${batchProgress.total}...`}
+                      {jobStatus === 'starting' ? (
+                        <Clock className="text-purple-400 animate-pulse" size={16} />
+                      ) : (
+                        <Loader2 className="animate-spin text-purple-500" size={16} />
+                      )}
+                      {jobStatus === 'starting' ? 'Starting download... please wait' : `Downloading ${batchProgress.current}/${batchProgress.total}...`}
                     </span>
-                    <span>{progress}%</span>
+                    <span>{jobStatus === 'starting' ? '--' : `${progress}%`}</span>
                   </div>
                   <div className="w-full bg-slate-900 rounded-full h-3 border border-slate-700 overflow-hidden">
                     <div 
-                      className="bg-purple-500 h-full transition-all duration-300"
-                      style={{ width: `${progress}%` }}
+                      className={clsx(
+                        "h-full transition-all duration-500",
+                        jobStatus === 'starting' 
+                          ? "bg-gradient-to-r from-purple-500 to-pink-500 animate-pulse" 
+                          : "bg-purple-500"
+                      )}
+                      style={{ width: jobStatus === 'starting' ? '30%' : `${progress}%` }}
                     ></div>
                   </div>
                 </div>
